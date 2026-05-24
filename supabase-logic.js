@@ -14,7 +14,6 @@ async function initAuth() {
             showApp();
         } else {
             _currentUser = null;
-            localStorage.clear();
             showAuth();
         }
     } catch(err) {
@@ -25,12 +24,10 @@ async function initAuth() {
     _supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
             _currentUser = session.user;
-            localStorage.clear();
             await loadUserData();
             showApp();
         } else if (event === 'SIGNED_OUT') {
             _currentUser = null;
-            localStorage.clear();
             showAuth();
         }
     });
@@ -38,27 +35,46 @@ async function initAuth() {
 
 function showAuth() {
     const s = document.getElementById('authScreen');
-    if (s) s.classList.remove('hide');
+    if (s) {
+        s.classList.remove('hide');
+        s.style.display = 'flex'; // Garantir que está visível
+    }
 }
 
 function showApp() {
     const s = document.getElementById('authScreen');
-    if (s) s.classList.add('hide');
-    CF.nome = _currentUser.user_metadata?.nome || _currentUser.email;
-    updUser();
+    if (s) {
+        s.classList.add('hide');
+        s.style.display = 'none'; // Garantir que está escondido
+    }
+    
+    // Configurar usuário
+    if (_currentUser) {
+        CF.nome = _currentUser.user_metadata?.nome || _currentUser.email;
+    }
+    
+    // Inicializar o app original
+    if (typeof updUser === 'function') updUser();
+    if (typeof updDashAvatar === 'function') updDashAvatar();
+    
     setTimeout(() => {
-        checkAdmin();
+        if (typeof checkAdmin === 'function') checkAdmin();
         if (typeof checkAdminUI === 'function') checkAdminUI();
     }, 150);
+    
     initTrialTimer();
-    go('dashboard');
+    
+    if (typeof go === 'function') go('dashboard');
+    
     setTimeout(() => {
         if (typeof rDash === 'function') rDash();
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }, 350);
+    
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && typeof rDash === 'function') setTimeout(rDash, 150);
     }, { once: true });
+    
     toast('Bem-vindo de volta! 👋');
 }
 
@@ -67,8 +83,16 @@ async function authLogin() {
     const email = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPass').value;
     if (!email || !password) { authShowErr('Preencha todos os campos.'); return; }
+    
+    const btn = document.querySelector('#viewLogin .auth-btn');
+    const originalText = btn ? btn.textContent : 'Entrar';
+    if (btn) btn.textContent = 'Entrando...';
+    
     const { error } = await _supabase.auth.signInWithPassword({ email, password });
-    if (error) authShowErr('E-mail ou senha incorretos.');
+    if (error) {
+        authShowErr('E-mail ou senha incorretos.');
+        if (btn) btn.textContent = originalText;
+    }
 }
 
 async function authCadastro() {
@@ -76,14 +100,25 @@ async function authCadastro() {
     const email = document.getElementById('cadEmail').value.trim();
     const password = document.getElementById('cadPass').value;
     const pass2 = document.getElementById('cadPass2').value;
+    
     if (!nome || !email || !password) { authShowErr('Preencha todos os campos.'); return; }
     if (password !== pass2) { authShowErr('As senhas não coincidem.'); return; }
+    
+    const btn = document.querySelector('#viewCadastro .auth-btn');
+    if (btn) btn.textContent = 'Criando conta...';
+    
     const { error } = await _supabase.auth.signUp({
         email, password,
         options: { data: { nome } }
     });
-    if (error) authShowErr('Erro: ' + error.message);
-    else { toast('Cadastro realizado! Faça login para entrar.'); authToggle('login'); }
+    
+    if (error) {
+        authShowErr('Erro: ' + error.message);
+        if (btn) btn.textContent = 'Cadastrar';
+    } else {
+        toast('Cadastro realizado! Faça login para entrar.');
+        if (typeof authToggle === 'function') authToggle('login');
+    }
 }
 
 async function authSair() {
@@ -100,46 +135,70 @@ async function authSair() {
 async function saveUserData() {
     if (!_currentUser || _isSyncing) return;
     _isSyncing = true;
-    const { error } = await _supabase.from('user_data').upsert({
-        user_id: _currentUser.id,
-        vendas: V, movimentacoes: M, clientes: C, produtos: P, config: CF,
-        updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id' });
-    if (error) console.error('Erro ao salvar:', error);
+    try {
+        const { error } = await _supabase.from('user_data').upsert({
+            user_id: _currentUser.id,
+            vendas: V, movimentacoes: M, clientes: C, produtos: P, config: CF,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+        if (error) console.error('Erro ao salvar:', error);
+    } catch (e) {
+        console.error('Erro exception ao salvar:', e);
+    }
     _isSyncing = false;
 }
 
 async function loadUserData() {
     if (!_currentUser) return;
-    const { data } = await _supabase.from('user_data').select('*').eq('user_id', _currentUser.id).single();
-    if (data) {
-        V = data.vendas || [];
-        M = data.movimentacoes || [];
-        C = data.clientes || [];
-        P = data.produtos || [];
-        Object.assign(CF, data.config || {});
-        updUser();
-        if (typeof rDash === 'function') setTimeout(rDash, 100);
-    } else {
-        V = []; M = []; C = []; P = []; CF = {};
-        await _supabase.from('user_data').insert({
-            user_id: _currentUser.id,
-            vendas: [], movimentacoes: [], clientes: [], produtos: [], config: {}
-        });
+    try {
+        const { data, error } = await _supabase.from('user_data').select('*').eq('user_id', _currentUser.id).single();
+        if (data) {
+            V = data.vendas || [];
+            M = data.movimentacoes || [];
+            C = data.clientes || [];
+            P = data.produtos || [];
+            Object.assign(CF, data.config || {});
+            if (typeof updUser === 'function') updUser();
+            if (typeof rDash === 'function') setTimeout(rDash, 100);
+        } else {
+            // Se não houver dados, criar registro inicial
+            await _supabase.from('user_data').insert({
+                user_id: _currentUser.id,
+                vendas: [], movimentacoes: [], clientes: [], produtos: [], config: {}
+            });
+        }
+    } catch (e) {
+        console.error('Erro ao carregar dados:', e);
     }
 }
 
 // Interceptar saves locais para sincronizar com Supabase
-const _origSave = S.s.bind(S);
-S.s = function(key, val) {
-    _origSave(key, val);
-    if (key === 'fa_v') V = val;
-    if (key === 'fa_m') M = val;
-    if (key === 'fa_c') C = val;
-    if (key === 'fa_p') P = val;
-    if (key === 'fa_cf') Object.assign(CF, val);
-    saveUserData();
-};
+// No app original, o objeto S tem métodos s (save) e so (save object)
+if (typeof S !== 'undefined' && S.s) {
+    const _origSave = S.s.bind(S);
+    S.s = function(key, val) {
+        _origSave(key, val);
+        if (key === 'fa_v') V = val;
+        if (key === 'fa_m') M = val;
+        if (key === 'fa_c') C = val;
+        if (key === 'fa_p') P = val;
+        if (key === 'fa_cf') Object.assign(CF, val);
+        saveUserData();
+    };
+}
+
+if (typeof S !== 'undefined' && S.so) {
+    const _origSaveObj = S.so.bind(S);
+    S.so = function(key, val) {
+        _origSaveObj(key, val);
+        if (key === 'fa_v') V = val;
+        if (key === 'fa_m') M = val;
+        if (key === 'fa_c') C = val;
+        if (key === 'fa_p') P = val;
+        if (key === 'fa_cf') Object.assign(CF, val);
+        saveUserData();
+    };
+}
 
 // Auto-save a cada 2 minutos
 setInterval(saveUserData, 2 * 60 * 1000);
@@ -162,7 +221,7 @@ const TRIAL_DURATION_MS = 30 * 60 * 1000;
 let _trialStartTime = null;
 
 function initTrialTimer() {
-    if (_currentUser?.email === ADMIN_EMAIL) return;
+    if (!_currentUser || _currentUser.email === ADMIN_EMAIL) return;
     const key = `trial_start_${_currentUser.id}`;
     const saved = localStorage.getItem(key);
     _trialStartTime = saved ? parseInt(saved) : Date.now();
@@ -171,11 +230,12 @@ function initTrialTimer() {
 }
 
 function checkTrialExpiration() {
-    if (!_currentUser || _currentUser.email === ADMIN_EMAIL) return;
+    if (!_currentUser || _currentUser.email === ADMIN_EMAIL || !_trialStartTime) return;
     if (Date.now() - _trialStartTime >= TRIAL_DURATION_MS) showPaymentScreen();
 }
 
 function showPaymentScreen() {
+    if (document.getElementById('paymentScreen')) return;
     const main = document.querySelector('main');
     if (main) main.style.display = 'none';
     const div = document.createElement('div');
@@ -194,4 +254,11 @@ function showPaymentScreen() {
 }
 
 // Inicializar
-window.addEventListener('load', () => { initAuth(); });
+window.addEventListener('DOMContentLoaded', () => { 
+    // Sobrescrever funções globais do app original para usar Supabase
+    window.authLogin = authLogin;
+    window.authCadastro = authCadastro;
+    window.authSair = authSair;
+    
+    initAuth(); 
+});

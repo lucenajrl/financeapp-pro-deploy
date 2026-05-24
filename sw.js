@@ -1,4 +1,4 @@
-const CACHE = 'financeapp-v3';
+const CACHE = 'financeapp-v3.1';
 const ASSETS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png', '/supabase-config.js', '/supabase-logic.js'];
 
 self.addEventListener('install', e => {
